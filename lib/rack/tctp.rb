@@ -1,5 +1,4 @@
 require 'radix'
-require 'ruby-prof'
 
 require_relative 'tctp/halec'
 
