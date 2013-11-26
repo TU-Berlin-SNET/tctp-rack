@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'rack-tctp'
-  s.version     = '0.9.2'
+  s.version     = '0.9.3'
   s.date        = '2013-11-21'
   s.summary     = 'Rack TCTP middleware'
   s.description = 'Rack middleware for end-to-end security through TCTP'

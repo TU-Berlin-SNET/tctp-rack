@@ -1,4 +1,5 @@
 require 'radix'
+require 'logger'
 
 require_relative 'tctp/halec'
 
@@ -23,7 +24,14 @@ module Rack
     attr_reader :sessions
 
     # Initializes TCTP middleware
-    def initialize(app)
+    def initialize(app, logger = nil)
+      unless logger
+        @logger = Kernel::Logger.new(STDOUT)
+        @logger.level = Logger::FATAL
+      else
+        @logger = logger
+      end
+
       @app = app
       @sessions = {}
     end
@@ -35,10 +43,11 @@ module Rack
     # * Decrypting TCTP secured entity-bodies
     # * Encrypting entity-bodies using TCTP
     def call(env)
+      status, headers, body = nil, nil, nil
+
       begin
         req = Rack::Request.new(env)
 
-        # Switch through TCTP use cases
         case
           when is_tctp_discovery?(req)
             # TCTP discovery
@@ -100,7 +109,17 @@ module Rack
             if is_tctp_response_requested?(req)
               # Gets the first free server HALEC for encryption
               # TODO Send error if cookie is missing
-              halec = @sessions[req.cookies['tctp_session_cookie']].free_halec
+              session = @sessions[req.cookies['tctp_session_cookie']]
+
+              unless session
+                return no_usable_halec_error
+              end
+
+              halec = session.free_halec
+
+              unless halec
+                return no_usable_halec_error
+              end
 
               # The length of the content body
               content_body_length = 0
@@ -136,11 +155,25 @@ module Rack
             end
         end
       rescue Exception => e
-        puts e
+        @logger.fatal e
+
+        error "Error in TCTP middleware. #{e} #{e.backtrace.inspect}"
       end
     end
 
     private
+      def log_key
+        'TCTP Middleware'
+      end
+
+      def no_usable_halec_error
+        error 'No useable HALEC for encryption. Please perform Handshake.'
+      end
+
+      def error(message)
+        [500, {'Content-Type' => 'text/plain', 'Content-Length' => message.length.to_s}, [message]]
+      end
+
       def is_tctp_discovery?(req)
         req.options? && !req.env['HTTP_ACCEPT'].nil? && req.env['HTTP_ACCEPT'].eql?(TCTP_DISCOVERY_MEDIA_TYPE)
       end
