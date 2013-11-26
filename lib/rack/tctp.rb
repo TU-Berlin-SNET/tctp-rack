@@ -145,6 +145,9 @@ module Rack
                 end
               end
 
+              # Finding this bug took waaaay too long ...
+              body.close if body.respond_to?(:close)
+
               # Sets the content length and encoding
               headers['Content-Length'] = content_body_length.to_s
               headers['Content-Encoding'] = 'encrypted'
