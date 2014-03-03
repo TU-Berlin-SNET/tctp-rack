@@ -26,8 +26,8 @@ module Rack
     # Initializes TCTP middleware
     def initialize(app, logger = nil)
       unless logger
-        @logger = Kernel::Logger.new(STDOUT)
-        @logger.level = Logger::FATAL
+        @logger = ::Logger.new(STDOUT)
+        @logger.level = ::Logger::FATAL
       else
         @logger = logger
       end
@@ -52,21 +52,22 @@ module Rack
           when is_tctp_discovery?(req)
             # TCTP discovery
             # TODO Parameterize discovery information
-            [200, {"Content-Type" => TCTP_DISCOVERY_MEDIA_TYPE, "Content-Length" => DEFAULT_TCTP_DISCOVERY_INFORMATION.length.to_s}, DEFAULT_TCTP_DISCOVERY_INFORMATION]
+            [200, {"Content-Type" => TCTP_DISCOVERY_MEDIA_TYPE, "Content-Length" => DEFAULT_TCTP_DISCOVERY_INFORMATION.length.to_s}, [DEFAULT_TCTP_DISCOVERY_INFORMATION]]
           when is_halec_creation?(req)
             # HALEC creation
-            halec = ServerHALEC.new(url: '/halecs/' + TCTP::new_slug)
+            halec = ServerHALEC.new(url: halec_uri(req.env, "/halecs/#{TCTP::new_slug}"))
 
             # TODO Allow creation using predefined cookie
             session = TCTPSession.new
 
             # Send client_hello to server HALEC and read handshake_response
             client_hello = req.body.read
-            halec.socket_there.write(client_hello)
-            handshake_response = [halec.socket_there.recv(2048)]
+            halec.engine.inject client_hello
+            halec.engine.read
+            handshake_response = [halec.engine.extract]
 
             # Set location header and content-length
-            header = {'Location' => halec.url, 'Content-Length' => handshake_response[0].length.to_s}
+            header = {'Location' => halec.url.to_s, 'Content-Length' => handshake_response[0].length.to_s}
 
             # Set the TCTP session cookie header
             Rack::Utils.set_cookie_header!(header, "tctp_session_cookie", {:value => session.session_id, :path => '/', :expires => Time.now+24*60*60})
@@ -78,13 +79,14 @@ module Rack
             [201, header, handshake_response]
           when is_halec_handshake?(req)
             # Get persisted server HALEC
-            halec = @sessions[req.cookies['tctp_session_cookie']].halecs[req.path_info]
+            halec = @sessions[req.cookies['tctp_session_cookie']].halecs[halec_uri(req.env, req.path_info)]
 
             # Write handshake message to server HALEC
-            halec.socket_there.write(req.body.read)
+            halec.engine.inject req.body.read
 
             # Receive handshake response
-            handshake_response = halec.socket_there.recv(2048)
+            halec.engine.read
+            handshake_response = halec.engine.extract
 
             # Send back server HALEC response
             [200, {'Content-Length' => handshake_response.length.to_s}, [handshake_response]]
@@ -96,10 +98,11 @@ module Rack
               halec_url = req.body.readline.chomp
 
               # Gets the HALEC
-              halec = @sessions[req.cookies['tctp_session_cookie']].halecs[halec_url]
+              halec = @sessions[req.cookies['tctp_session_cookie']].halecs[URI(halec_url)]
 
-              halec.socket_there.write(req.body.read)
-              decrypted_body.write(halec.ssl_socket.readpartial(2 ** 26 - 1))
+              read_body = req.body.read
+
+              decrypted_body.write halec.decrypt_data(read_body)
 
               req.body.string = decrypted_body.string
             end
@@ -125,7 +128,7 @@ module Rack
               content_body_length = 0
 
               # The first line
-              first_line = halec.url + "\r\n"
+              first_line = halec.url.to_s + "\r\n"
               content_body_length += first_line.length
 
               # Encrypt the body. The first line of the response specifies the used HALEC
@@ -134,15 +137,9 @@ module Rack
 
               # Encrypt each body fragment
               body.each do |fragment|
-                bodyio = StringIO.new(fragment)
-
-                until bodyio.eof? do
-                  chunk = bodyio.read(16 * 1024)
-                  halec.ssl_socket.write(chunk)
-                  encrypted_chunk = halec.socket_there.readpartial(32 * 1024)
-                  encrypted_body << encrypted_chunk
-                  content_body_length += encrypted_chunk.length
-                end
+                encrypted_fragment = halec.encrypt_data fragment
+                encrypted_body << encrypted_fragment
+                content_body_length += encrypted_fragment.length
               end
 
               # Finding this bug took waaaay too long ...
@@ -190,7 +187,7 @@ module Rack
             !req.cookies.nil? &&
             req.cookies.has_key?('tctp_session_cookie') &&
             sessions.has_key?(req.cookies['tctp_session_cookie']) &&
-            sessions[req.cookies['tctp_session_cookie']].halecs.has_key?(req.path_info)
+            sessions[req.cookies['tctp_session_cookie']].halecs.has_key?(halec_uri(req.env, req.path_info))
       end
 
       def is_tctp_response_requested? (req)
@@ -199,6 +196,14 @@ module Rack
 
       def is_tctp_encrypted_body? (req)
         req.env['HTTP_CONTENT_ENCODING'].eql?('encrypted')
+      end
+
+      # Builds an URI object to be used as a HALEC +uri+
+      # @param [Hash] env A Rack environment hash
+      # @param [String] path A path
+      # @return [URI] An HALEC +uri+
+      def halec_uri(env, path)
+        URI("#{env['rack.url_scheme']}://#{env['HTTP_HOST']}:#{env['SERVER_PORT']}#{path}")
       end
   end
 

@@ -32,20 +32,11 @@ class TCTPTest < Test::Unit::TestCase
   # * Posting encrypted data
   # * Receiving encrypted data
   def test_tctp_encryption
-    client_halec = ClientHALEC.new()
-
-    # Connect sends out the handshake, but would block until handshake is completed. Therefore the connect is run in
-    # another thread.
-    Thread.new {
-      begin
-        client_halec.ssl_socket.connect
-      rescue Exception => e
-        puts e
-      end
-    }
+    client_halec = Rack::TCTP::ClientHALEC.new()
 
     # Receive the TLS client_hello
-    client_hello = client_halec.socket_there.recv(1024)
+    client_halec.engine.read
+    client_hello = client_halec.engine.extract
 
     # Post the client_hello to the HALEC creation URI, starting the handshake
     post '/halecs', {}, {input: client_hello}
@@ -56,16 +47,17 @@ class TCTPTest < Test::Unit::TestCase
     halec_url = last_response.headers['Location']
 
     # Feed the handshake response (server_hello, certificate, etc.) from the entity-body to the client HALEC
-    client_halec.socket_there.write(last_response.body)
+    client_halec.engine.inject(last_response.body)
 
     # Read the TLS client response (client_key_exchange, change_cipher_spec, finished)
-    client_response = client_halec.socket_there.recv(2048)
+    client_halec.engine.read
+    client_response = client_halec.engine.extract
 
     # Post the TLS client response to the HALEC url
     post halec_url, {}, {input: client_response}
 
     # Feed the handshake response (change_cipher_spec, finished) to the client HALEC
-    client_halec.socket_there.write(last_response.body)
+    client_halec.engine.inject last_response.body
 
     # The handshake is now complete!
 
@@ -81,11 +73,10 @@ class TCTPTest < Test::Unit::TestCase
     url = body_stream.readline
 
     # Write the rest of the stream to the client HALEC
-    body_encrypted = body_stream.readpartial(1024*1024)
-    client_halec.socket_there.write(body_encrypted)
+    client_halec.engine.inject body_stream.read
 
     # Read the decrypted body
-    decrypted_body = client_halec.ssl_socket.readpartial(1024*1024)
+    decrypted_body = client_halec.engine.read
 
     puts decrypted_body
 
@@ -98,8 +89,8 @@ class TCTPTest < Test::Unit::TestCase
     lorem_ipsum = Faker::Lorem.paragraphs.join("\n")
 
     # Encrypts lorem_ipsum
-    client_halec.ssl_socket.write(lorem_ipsum)
-    encrypted_lorem = client_halec.socket_there.recv(1024*1024)
+    client_halec.engine.write lorem_ipsum
+    encrypted_lorem = client_halec.engine.extract
     post_body.write(encrypted_lorem)
 
     # Rewind the StringIO as it is passed as-is to the TCTP middleware and otherwise reading would result in EOF
@@ -119,11 +110,10 @@ class TCTPTest < Test::Unit::TestCase
     url = body_stream.readline
 
     # Write the rest of the stream to the client HALEC
-    body_encrypted = body_stream.readpartial(1024*1024)
-    client_halec.socket_there.write(body_encrypted)
+    client_halec.engine.inject body_stream.read
 
     # Read the decrypted body
-    decrypted_body = client_halec.ssl_socket.readpartial(1024*1024)
+    decrypted_body = client_halec.engine.read
 
     # Compares the response
     assert_equal lorem_ipsum, decrypted_body

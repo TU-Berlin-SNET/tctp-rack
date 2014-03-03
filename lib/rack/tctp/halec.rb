@@ -1,19 +1,16 @@
 require 'openssl'
 require 'socket'
+require 'radix'
+
+require 'rack/tctp/engine'
 
 # HTTP application layer encryption channel. Used for the Trusted Cloud Transfer Protocol (TCTP)
-class HALEC
+class Rack::TCTP::HALEC
+  # The SSL engine
+  attr_reader :engine
+
   # The URL of this HALEC
-  attr_reader :url
-
-  # The plaintext socket
-  attr_reader :socket_here
-
-  # The SSL socket
-  attr_reader :ssl_socket
-
-  # The encrypted socket
-  attr_reader :socket_there
+  attr_accessor :url
 
   # The private key for a certificate (if any)
   attr_reader :private_key
@@ -21,40 +18,68 @@ class HALEC
   # A server or client certificate (if any)
   attr_reader :certificate
 
-  # The TLS context
-  attr_reader :ctx
-
   def initialize(options = {})
-    @url = options[:url] || ''
-    @ctx = options[:ssl_context] || OpenSSL::SSL::SSLContext.new()
-
-    @ctx.ssl_version = :TLSv1
-
-    @socket_here, @socket_there = socket_pair
-    [@socket_here, @socket_there].each do |socket|
-      socket.set_encoding(Encoding::BINARY)
-    end
+    @url = options[:url] || nil
   end
 
-  private
-    def socket_pair
-      Socket.pair(:UNIX, :STREAM, 0) # Linux
-    rescue Errno::EAFNOSUPPORT
-      Socket.pair(:INET, :STREAM, 0) # Windows
+  # Encrypts +plaintext+ data and either returns the encrypted data or calls a block with it.
+  # @param [String] plaintext The plaintext
+  # @return [String] The encrypted data
+  # @yield Gives the encrypted data to the block
+  # @yieldparam [String] The encrypted data
+  def encrypt_data(plaintext, &encrypted)
+    @engine.write plaintext
+
+    while(read_chunk = @engine.extract)
+      if(block_given?)
+        encrypted.call read_chunk
+      else
+        if read_data
+          read_data.write read_chunk
+        else
+          read_data = StringIO.new(read_chunk)
+        end
+      end
     end
+
+    read_data.string unless block_given?
+  end
+
+  # Decrypts +encrypted+ data and either returns the plaintext or calls a block with it.
+  # @param [String] encrypted The encrypted data
+  # @return [String] The plaintext
+  # @yield Gives the plaintext to the block
+  # @yieldparam [String] The plaintext
+  def decrypt_data(encrypted, &decrypted)
+    @engine.inject encrypted
+
+    while(read_chunk = @engine.read)
+      if(block_given?)
+        decrypted.call read_chunk
+      else
+        if read_data
+          read_data.write read_chunk
+        else
+          read_data = StringIO.new(read_chunk)
+        end
+      end
+    end
+
+    read_data.string unless block_given?
+  end
 end
 
 # The Client end of an HALEC
-class ClientHALEC < HALEC
+class Rack::TCTP::ClientHALEC < Rack::TCTP::HALEC
   def initialize(options = {})
     super(options)
 
-    @ssl_socket = OpenSSL::SSL::SSLSocket.new(@socket_here, @ctx)
+    @engine = Rack::TCTP::Engine.client
   end
 end
 
 # The Server end of an HALEC
-class ServerHALEC < HALEC
+class Rack::TCTP::ServerHALEC < Rack::TCTP::HALEC
   def initialize(options = {})
     super(options)
 
@@ -62,21 +87,19 @@ class ServerHALEC < HALEC
       @private_key = options[:private_key]
       @certificate = options[:certificate]
     else
-      @private_key = ServerHALEC.default_key
-      @certificate = ServerHALEC.default_self_signed_certificate
+      @private_key = self.class.default_key
+      @certificate = self.class.default_self_signed_certificate
     end
 
-    @ctx.cert = @certificate
-    @ctx.key = @private_key
+    @private_key_file = Tempfile.new('rack_tctp_pk')
+    @private_key_file.write @private_key.to_s
+    @private_key_file.close
 
-    @ssl_socket = OpenSSL::SSL::SSLSocket.new(@socket_here, @ctx)
-    Thread.new {
-      begin
-        s = @ssl_socket.accept
-      rescue Exception => e
-        puts e
-      end
-    }
+    @certificate_file = Tempfile.new('rack_tctp_cert')
+    @certificate_file.write @certificate.to_s
+    @certificate_file.close
+
+    @engine = Rack::TCTP::Engine.server(@private_key_file.path, @certificate_file.path)
   end
 
   class << self
@@ -111,6 +134,16 @@ class ServerHALEC < HALEC
       cert.subject = name
 
       cert
+    end
+
+    # The slug URI can contain any HTTP compatible characters
+    def slug_base
+      Radix::Base.new(Radix::BASE::B62 + ['-', '_'])
+    end
+
+    # Generate a new random slug (2^64 possibilities)
+    def new_slug
+      slug_base.convert(rand(2**64), 10)
     end
   end
 end
