@@ -102,7 +102,11 @@ module Rack
 
               read_body = req.body.read
 
-              decrypted_body.write halec.decrypt_data(read_body)
+              begin
+                decrypted_body.write halec.decrypt_data(read_body)
+              rescue Exception => e
+                error(e.message + e.backtrace.join("<br/>\n"))
+              end
 
               req.body.string = decrypted_body.string
             end

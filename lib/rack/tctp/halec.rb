@@ -28,21 +28,25 @@ class Rack::TCTP::HALEC
   # @yield Gives the encrypted data to the block
   # @yieldparam [String] The encrypted data
   def encrypt_data(plaintext, &encrypted)
-    @engine.write plaintext
+    written = @engine.write plaintext
 
-    while(read_chunk = @engine.extract)
-      if(block_given?)
-        encrypted.call read_chunk
-      else
-        if read_data
-          read_data.write read_chunk
-        else
-          read_data = StringIO.new(read_chunk)
-        end
-      end
+    if written < plaintext.length
+      exit -1
     end
 
-    read_data.string unless block_given?
+    read_data = []
+
+    while(read_chunk = @engine.extract)
+      read_data << read_chunk
+    end
+
+    if block_given?
+      read_data.each do |data|
+        encrypted.call data
+      end
+    else
+      read_data.join
+    end
   end
 
   # Decrypts +encrypted+ data and either returns the plaintext or calls a block with it.
@@ -51,21 +55,25 @@ class Rack::TCTP::HALEC
   # @yield Gives the plaintext to the block
   # @yieldparam [String] The plaintext
   def decrypt_data(encrypted, &decrypted)
-    @engine.inject encrypted
+    injected = @engine.inject encrypted
 
-    while(read_chunk = @engine.read)
-      if(block_given?)
-        decrypted.call read_chunk
-      else
-        if read_data
-          read_data.write read_chunk
-        else
-          read_data = StringIO.new(read_chunk)
-        end
-      end
+    if injected < encrypted.length
+      exit -1
     end
 
-    read_data.string unless block_given?
+    read_data = []
+
+    while(read_chunk = @engine.read)
+      read_data << read_chunk
+    end
+
+    if block_given?
+      read_data.each do |data|
+        decrypted.call data
+      end
+    else
+      read_data.join
+    end
   end
 end
 
