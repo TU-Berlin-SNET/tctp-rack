@@ -1,6 +1,12 @@
+# coding: utf-8
+lib = File.expand_path('lib', __dir__)
+$:.unshift(lib) unless $:.include?(lib)
+
+require 'rack-tctp/version'
+
 Gem::Specification.new do |s|
   s.name        = 'rack-tctp'
-  s.version     = '0.9.5'
+  s.version     = Rack::TCTP::VERSION
   s.date        = '2013-11-26'
   s.summary     = 'Rack TCTP middleware'
   s.description = 'Rack middleware for end-to-end security through TCTP'

@@ -18,8 +18,37 @@ class Rack::TCTP::HALEC
   # A server or client certificate (if any)
   attr_reader :certificate
 
+  # The thread for encrypting and decrypting data of this HALEC
+  attr_reader :async_thread
+
+  # The queue for encrypting and decrypting data
+  # @return [Queue] The async queue
+  attr_reader :async_queue
+
   def initialize(options = {})
     @url = options[:url] || nil
+
+    @async_queue = Queue.new
+
+    Thread.new do
+      begin
+        while true
+          item = @async_queue.pop
+
+          case item[0]
+            when :encrypt
+              item[2].call encrypt_data(item[1])
+            when :decrypt
+              item[2].call decrypt_data(item[1])
+            when :call
+              item[2].call
+          end
+        end
+      rescue Exception => e
+        #TODO Handle HALEC encryption thread shutdown
+        puts e
+      end
+    end
   end
 
   # Encrypts +plaintext+ data and either returns the encrypted data or calls a block with it.
@@ -49,6 +78,14 @@ class Rack::TCTP::HALEC
     end
   end
 
+  # Encrypts +plaintext+ data asynchronously, yielding data to the block when done.
+  # @param [String] plaintext The plaintext
+  # @yield Gives the encrypted data to the block
+  # @yieldparam [String] The encrypted data
+  def encrypt_data_async(plaintext, &encrypted)
+    async_queue.push [:encrypt, plaintext, encrypted]
+  end
+
   # Decrypts +encrypted+ data and either returns the plaintext or calls a block with it.
   # @param [String] encrypted The encrypted data
   # @return [String] The plaintext
@@ -67,13 +104,26 @@ class Rack::TCTP::HALEC
       read_data << read_chunk
     end
 
-    if block_given?
+    if block_given? then
       read_data.each do |data|
         decrypted.call data
       end
     else
       read_data.join
     end
+  end
+
+  # Decrypts +encrypted+ data asynchronously, yielding data to the block when done.
+  # @param [String] encrypted The encrypted data
+  # @yield Gives the decrypted data to the block
+  # @yieldparam [String] the decrypted data
+  def decrypt_data_async(encrypted, &decrypted)
+    async_queue.push [:decrypt, encrypted, decrypted]
+  end
+
+  # Calls a given block asynchronously, considering the order of all calls to async methods.
+  def call_async(&block)
+    async_queue.push [:call, nil, block]
   end
 end
 
