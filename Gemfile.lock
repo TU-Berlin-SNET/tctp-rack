@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rack-tctp (0.9.5)
+    rack-tctp (0.9.8)
       radix (~> 2.2.0)
       rest-client (~> 1.6.7)
 
@@ -11,7 +11,7 @@ GEM
     faker (1.1.2)
       i18n (~> 0.5)
     i18n (0.6.5)
-    mime-types (2.0)
+    mime-types (2.1)
     rack (1.5.2)
     rack-test (0.6.2)
       rack (>= 1.0)
@@ -26,11 +26,9 @@ PLATFORMS
   x86-mingw32
 
 DEPENDENCIES
-  faker
+  faker (~> 1.1.2)
   rack-tctp!
-  rack-test
-  radix
-  rest-client
-  ruby-prof
-  test-unit
+  rack-test (~> 0.6.2)
+  ruby-prof (~> 0.13.0)
+  test-unit (~> 2.5.5)
   win32console (= 1.3.2)

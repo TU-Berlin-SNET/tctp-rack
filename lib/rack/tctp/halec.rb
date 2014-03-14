@@ -23,32 +23,37 @@ class Rack::TCTP::HALEC
 
   # The queue for encrypting and decrypting data
   # @return [Queue] The async queue
-  attr_reader :async_queue
+  # @!attr [r] async_queue
+  def async_queue
+    unless @async_queue
+      @async_queue = Queue.new
+
+      @async_thread = Thread.new do
+        begin
+          while true
+            item = @async_queue.pop
+
+            case item[0]
+              when :encrypt
+                item[2].call encrypt_data(item[1])
+              when :decrypt
+                item[2].call decrypt_data(item[1])
+              when :call
+                item[2].call
+            end
+          end
+        rescue Exception => e
+          #TODO Handle HALEC encryption thread shutdown
+          puts e
+        end
+      end
+    end
+
+    @async_queue
+  end
 
   def initialize(options = {})
     @url = options[:url] || nil
-
-    @async_queue = Queue.new
-
-    Thread.new do
-      begin
-        while true
-          item = @async_queue.pop
-
-          case item[0]
-            when :encrypt
-              item[2].call encrypt_data(item[1])
-            when :decrypt
-              item[2].call decrypt_data(item[1])
-            when :call
-              item[2].call
-          end
-        end
-      rescue Exception => e
-        #TODO Handle HALEC encryption thread shutdown
-        puts e
-      end
-    end
   end
 
   # Encrypts +plaintext+ data and either returns the encrypted data or calls a block with it.
