@@ -1,5 +1,5 @@
 module Rack
-  module TCTP
-    VERSION = '0.9.8'
+  class TCTP
+    VERSION = '0.9.9'
   end
 end
