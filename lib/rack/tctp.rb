@@ -95,7 +95,7 @@ module Rack
             if is_tctp_encrypted_body?(req) then
               decrypted_body = StringIO.new
 
-              halec_url = req.body.readline.chomp
+              halec_url = req.body.gets.chomp
 
               # Gets the HALEC
               halec = @sessions[req.cookies['tctp_session_cookie']].halecs[URI(halec_url)]
@@ -108,7 +108,9 @@ module Rack
                 error(e.message + e.backtrace.join("<br/>\n"))
               end
 
-              req.body.string = decrypted_body.string
+              decrypted_body.rewind
+
+              env['rack.input'] = decrypted_body
             end
 
             status, headers, body = @app.call(env)
