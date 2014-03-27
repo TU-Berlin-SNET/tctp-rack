@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    rack-tctp (0.9.10)
+    rack-tctp (0.9.12)
       radix (~> 2.2.0)
       rest-client (~> 1.6.7)
 

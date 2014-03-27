@@ -9,6 +9,7 @@ module Rack
   class TCTP
     DEFAULT_TCTP_DISCOVERY_INFORMATION = '/.*:/halecs'
     TCTP_DISCOVERY_MEDIA_TYPE = 'text/prs.tctp-discovery'
+    TCTP_MEDIA_TYPE = 'binary/prs.tctp'
 
     # The slug URI can contain any HTTP compatible characters
     def self.slug_base
@@ -67,7 +68,11 @@ module Rack
             handshake_response = [halec.engine.extract]
 
             # Set location header and content-length
-            header = {'Location' => halec.url.to_s, 'Content-Length' => handshake_response[0].length.to_s}
+            header = {
+                'Location' => halec.url.to_s,
+                'Content-Length' => handshake_response[0].length.to_s,
+                'Content-Type' => TCTP_MEDIA_TYPE
+            }
 
             # Set the TCTP session cookie header
             Rack::Utils.set_cookie_header!(header, "tctp_session_cookie", {:value => session.session_id, :path => '/', :expires => Time.now+24*60*60})
@@ -89,7 +94,10 @@ module Rack
             handshake_response = halec.engine.extract
 
             # Send back server HALEC response
-            [200, {'Content-Length' => handshake_response.length.to_s}, [handshake_response]]
+            [200, {
+                'Content-Length' => handshake_response.length.to_s,
+                'Content-Type' => TCTP_MEDIA_TYPE
+            }, [handshake_response]]
           else
             # Decrypt TCTP secured bodies
             if is_tctp_encrypted_body?(req) then
@@ -115,7 +123,7 @@ module Rack
 
             status, headers, body = @app.call(env)
 
-            if is_tctp_response_requested?(req)
+            if is_tctp_response_requested?(req) && status >= 200 && ![204, 205, 304].include?(status)
               # Gets the first free server HALEC for encryption
               # TODO Send error if cookie is missing
               session = @sessions[req.cookies['tctp_session_cookie']]
@@ -124,7 +132,7 @@ module Rack
                 return no_usable_halec_error
               end
 
-              halec = session.free_halec
+              halec = session.pop_halec
 
               unless halec
                 return no_usable_halec_error
@@ -148,6 +156,12 @@ module Rack
                 content_body_length += encrypted_fragment.length
               end
 
+              encrypted_body.define_singleton_method :close do
+                session.push_halec halec
+
+                super() if self.class.superclass.respond_to? :close
+              end
+
               # Finding this bug took waaaay too long ...
               body.close if body.respond_to?(:close)
 
@@ -161,6 +175,7 @@ module Rack
             end
         end
       rescue Exception => e
+        # TODO Handle SSL Error
         @logger.fatal e
 
         error "Error in TCTP middleware. #{e} #{e.backtrace.inspect}"
@@ -218,14 +233,29 @@ module Rack
 
     attr_reader :halecs
 
+    attr_reader :halecs_mutex
+
     def initialize(session_id = TCTP::new_slug)
       @session_id = session_id
       @halecs = {}
+      @halecs_mutex = Mutex.new
     end
 
-    def free_halec
-      # TODO free HALEC handling
-      @halecs.first[1]
+    def pop_halec
+      free_halec = nil
+
+      @halecs_mutex.synchronize do
+        free_halec = @halecs.first {|url, halec| halec.engine.state.eql? 'SSLOK '}
+
+        @halecs.delete free_halec[0] if free_halec
+      end
+      return free_halec[1]
+    end
+
+    def push_halec(halec)
+      @halecs_mutex.synchronize do
+        @halecs[halec.url] = halec
+      end
     end
   end
 end

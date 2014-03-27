@@ -191,6 +191,17 @@ VALUE engine_extract(VALUE self) {
   return Qnil;
 }
 
+VALUE engine_state(VALUE self) {
+  ms_conn* conn;
+  VALUE str;
+
+  Data_Get_Struct(self, ms_conn, conn);
+
+  str = rb_str_new(SSL_state_string(conn->ssl), 6);
+
+  return str;
+}
+
 void Init_engine() {
   VALUE mod, eng, rack;
   
@@ -213,4 +224,6 @@ void Init_engine() {
 
   rb_define_method(eng, "write",  engine_write, 1);
   rb_define_method(eng, "extract", engine_extract, 0);
+
+  rb_define_method(eng, "state", engine_state, 0);
 }

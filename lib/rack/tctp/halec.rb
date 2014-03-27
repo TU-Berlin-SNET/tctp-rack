@@ -44,6 +44,7 @@ class Rack::TCTP::HALEC
           end
         rescue Exception => e
           #TODO Handle HALEC encryption thread shutdown
+          #TODO Handle OpenSSL error
           puts e
         end
       end
