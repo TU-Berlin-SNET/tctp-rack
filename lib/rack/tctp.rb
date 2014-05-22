@@ -224,7 +224,11 @@ module Rack
       # @param [String] path A path
       # @return [URI] An HALEC +uri+
       def halec_uri(env, path)
-        URI("#{env['rack.url_scheme']}://#{env['HTTP_HOST']}:#{env['SERVER_PORT']}#{path}")
+        if(env['HTTP_HOST'])
+          URI("#{env['rack.url_scheme']}://#{env['HTTP_HOST']}#{path}")
+        else
+          URI("#{env['rack.url_scheme']}://#{env['SERVER_NAME']}:#{env['SERVER_PORT']}#{path}")
+        end
       end
   end
 
