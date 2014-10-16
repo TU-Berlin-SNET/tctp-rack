@@ -45,7 +45,9 @@ class Rack::TCTP::HALEC
         rescue Exception => e
           #TODO Handle HALEC encryption thread shutdown
           #TODO Handle OpenSSL error
-          puts e
+          unless item[0] == :call
+            item[2].call e
+          end
         end
       end
     end
@@ -87,7 +89,7 @@ class Rack::TCTP::HALEC
   # Encrypts +plaintext+ data asynchronously, yielding data to the block when done.
   # @param [String] plaintext The plaintext
   # @yield Gives the encrypted data to the block
-  # @yieldparam [String] The encrypted data
+  # @yieldparam [String|Exception] The encrypted data or an exception
   def encrypt_data_async(plaintext, &encrypted)
     async_queue.push [:encrypt, plaintext, encrypted]
   end
@@ -100,14 +102,20 @@ class Rack::TCTP::HALEC
   def decrypt_data(encrypted, &decrypted)
     injected = @engine.inject encrypted
 
-    if injected < encrypted.length
+    unless injected
       exit -1
     end
 
     read_data = []
 
-    while(read_chunk = @engine.read)
-      read_data << read_chunk
+    begin
+      while(read_chunk = @engine.read)
+        read_data << read_chunk
+      end
+    rescue Exception => e
+      unless @engine.state == 'SSLOK '
+        raise e
+      end
     end
 
     if block_given? then
@@ -122,7 +130,7 @@ class Rack::TCTP::HALEC
   # Decrypts +encrypted+ data asynchronously, yielding data to the block when done.
   # @param [String] encrypted The encrypted data
   # @yield Gives the decrypted data to the block
-  # @yieldparam [String] the decrypted data
+  # @yieldparam [String|Exception] the decrypted data or an exception
   def decrypt_data_async(encrypted, &decrypted)
     async_queue.push [:decrypt, encrypted, decrypted]
   end

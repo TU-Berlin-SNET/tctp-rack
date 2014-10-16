@@ -58,8 +58,7 @@ module Rack
             # HALEC creation
             halec = ServerHALEC.new(url: halec_uri(req.env, "/halecs/#{TCTP::new_slug}"))
 
-            # TODO Allow creation using predefined cookie
-            session = TCTPSession.new
+            session = sessions[req.cookies['tctp_session_cookie']] || TCTPSession.new
 
             # Send client_hello to server HALEC and read handshake_response
             client_hello = req.body.read
@@ -78,7 +77,7 @@ module Rack
             Rack::Utils.set_cookie_header!(header, "tctp_session_cookie", {:value => session.session_id, :path => '/', :expires => Time.now+24*60*60})
 
             # Persist session and HALEC
-            session.halecs[halec.url] = halec
+            session.push_halec(halec)
             sessions[session.session_id] = session
 
             [201, header, handshake_response]

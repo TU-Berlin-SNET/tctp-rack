@@ -21,6 +21,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency 'rack-test', '~> 0.6.2'
   s.add_development_dependency 'test-unit', '~> 2.5.5'
   s.add_development_dependency 'ruby-prof', '~> 0.13.0'
+  s.add_development_dependency 'rake-compiler', '~> 0.9'
 
   s.add_runtime_dependency 'rest-client', '~> 1.6.7'
   s.add_runtime_dependency 'radix', '~> 2.2.0'
